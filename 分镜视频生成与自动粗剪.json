@@ -1,0 +1,624 @@
+{
+  "name": "分镜视频生成与自动粗剪",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## 分镜视频生成与自动粗剪\n\n### 本工作流分两段运行：\n\n**【第一段】点击上方触发器「触发1-生成提示词」**\n- 自动读取「图片已生成」的分镜\n- 用 Gemini 为每张图片生成图生视频提示词\n- 更新 Google Sheets 的「视频提示词」列\n- 生成 HTML 任务清单（含图片+提示词，可一键复制）\n- 打开 /tmp/video_workspace/task_list.html\n- 逐个到 PixVerse/即梦网页端上传图片 + 粘贴提示词生成视频\n- 将视频 URL 填回 Google Sheets 的「视频URL」列\n\n**【第二段】所有视频URL填完后，点击下方触发器「触发2-粗剪拼接」**\n- 自动下载所有视频并按分镜序号排序\n- FFmpeg 拼接为完整粗剪视频\n- 输出到 /tmp/video_workspace/final_output.mp4\n- 需要精剪的再导入剪映手动调整\n\n### 需要替换：\n1. **YOUR_GEMINI_API_KEY** → Google AI Studio API Key\n2. **YOUR_SPREADSHEET_ID** → Google Sheets ID\n3. **YOUR_CREDENTIAL_ID** → n8n Google Sheets OAuth2 凭证",
+        "height": 460,
+        "width": 420,
+        "color": 4
+      },
+      "id": "sticky-note-001",
+      "name": "使用说明",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-400, 200]
+    },
+    {
+      "parameters": {},
+      "id": "trigger1-003",
+      "name": "触发1-生成提示词",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [0, 400]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_SPREADSHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": "生产任务",
+        "options": {}
+      },
+      "id": "read-tasks-004",
+      "name": "读取生产任务",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [220, 400],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "Google Sheets OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": ""
+          },
+          "conditions": [
+            {
+              "id": "condition-status",
+              "leftValue": "={{ $json['状态'] }}",
+              "rightValue": "图片已生成",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "condition-image-url",
+              "leftValue": "={{ $json['图片URL'] }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "filter-ready-005",
+      "name": "筛选已生成图片",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [440, 400]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "loop-scenes-006",
+      "name": "遍历分镜",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [660, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=YOUR_GEMINI_API_KEY",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"contents\": [\n    {\n      \"parts\": [\n        {\n          \"text\": \"你是一位专业的AI视频导演。根据以下分镜信息，为一张静态图片生成一段'图生视频'提示词（用于 PixVerse / 即梦等AI视频工具）。\\n\\n核心规则：\\n1. 绝对不要描述图片中已有的静态元素（AI视频模型会自动参考原图）\\n2. 只描述以下动态要素：\\n   - 镜头运动：如 slow zoom in, dolly out, pan left to right, tracking shot, crane up, handheld shake, static shot\\n   - 主体动作：具体的动作和运动轨迹，如 'slowly turns head to the left, ears perked up, then begins trotting forward'\\n   - 环境动态：如 gentle breeze rustling grass, dappled sunlight shifting, water rippling, dust particles floating\\n   - 运动节奏：如 slow motion, normal speed, gradually accelerating, smooth and steady\\n3. 长度：30-50个英文单词\\n4. 只输出纯英文提示词，不要编号、标签、解释\\n\\n参考信息：\\n- 画面描述：{{ $json['画面描述'] }}\\n- 镜头运动参考：{{ $json['camera_movement'] || 'static' }}\\n- 画面氛围：{{ $json['mood'] || 'neutral' }}\"\n        }\n      ]\n    }\n  ],\n  \"generationConfig\": {\n    \"temperature\": 0.4\n  }\n}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "gemini-video-prompt-007",
+      "name": "Gemini生成视频提示词",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [880, 400],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "amount": 3,
+        "unit": "seconds"
+      },
+      "id": "wait-gemini-008",
+      "name": "等待3秒",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1100, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 提取视频提示词 + 保留原始数据\nconst response = $input.first().json;\nconst sceneData = $('遍历分镜').item.json;\n\nlet videoPrompt = '';\ntry {\n  videoPrompt = response.candidates?.[0]?.content?.parts?.[0]?.text || '';\n  videoPrompt = videoPrompt.trim();\n} catch (e) {\n  videoPrompt = '';\n}\n\nreturn [{\n  json: {\n    ...sceneData,\n    video_prompt: videoPrompt\n  }\n}];"
+      },
+      "id": "extract-prompt-009",
+      "name": "提取视频提示词",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1320, 400]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_SPREADSHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": "生产任务",
+        "columnToMatchOn": "分镜序号",
+        "valueToMatchOn": "={{ $json['分镜序号'] }}",
+        "columns": {
+          "mappingValues": [
+            {
+              "column": "视频提示词",
+              "value": "={{ $json.video_prompt }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "update-prompt-010",
+      "name": "更新视频提示词到Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1540, 400],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "Google Sheets OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "amount": 2,
+        "unit": "seconds"
+      },
+      "id": "wait-loop-011",
+      "name": "分镜间等待",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1760, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// [FIX Bug4] 创建工作目录 + 生成图生视频任务清单 HTML\n// 合并到同一 Code 节点，避免 mkdir 节点游离于主流程外\nconst items = $input.all();\n\nconst mkdirCommand = 'mkdir -p /tmp/video_workspace';\ntry { require('fs').mkdirSync('/tmp/video_workspace', { recursive: true }); } catch(e) {}\n\nlet html = `<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\">\n<title>图生视频任务清单</title>\n<style>\n  body { font-family: -apple-system, sans-serif; max-width: 1200px; margin: 0 auto; padding: 20px; background: #fafafa; }\n  h1 { color: #333; border-bottom: 2px solid #4CAF50; padding-bottom: 10px; }\n  .task { display: flex; gap: 20px; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px; margin: 16px 0; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1); align-items: flex-start; }\n  .task img { width: 400px; border-radius: 8px; object-fit: cover; }\n  .info { flex: 1; }\n  h3 { margin: 0 0 8px 0; color: #333; }\n  .prompt { background: #f5f5f5; padding: 12px; border-radius: 6px; font-family: monospace; font-size: 13px; line-height: 1.5; margin: 8px 0; white-space: pre-wrap; cursor: pointer; border: 1px solid #e0e0e0; }\n  .prompt:hover { background: #e8f5e9; border-color: #4CAF50; }\n  .copy-btn { background: #4CAF50; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 14px; }\n  .copy-btn:hover { background: #45a049; }\n  .scene-num { display: inline-block; background: #4CAF50; color: white; padding: 2px 10px; border-radius: 12px; font-size: 12px; margin-bottom: 8px; }\n  .meta { color: #888; font-size: 12px; margin: 4px 0; }\n</style></head><body>\n<h1>图生视频任务清单</h1>\n<p style=\"color:#888\">点击提示词可复制 | 在 PixVerse/即梦网页端上传图片 + 粘贴提示词 | 生成后将视频URL填回 Google Sheets</p>\n<hr>`;\n\nfor (const item of items) {\n  const d = item.json;\n  const imgUrl = d['图片URL'] || d.image_url || '';\n  const sceneNum = d['分镜序号'] || d.scene_number || '?';\n  const desc = d['画面描述'] || d.description_cn || '';\n  const prompt = d.video_prompt || '';\n  const escapedPrompt = prompt.replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"\\\\'\").replace(/\\n/g, ' ');\n\n  html += `\n<div class=\"task\">\n  <img src=\"${imgUrl}\" alt=\"分镜${sceneNum}\" onerror=\"this.style.display='none'\">\n  <div class=\"info\">\n    <span class=\"scene-num\">分镜 ${sceneNum}</span>\n    <h3>${desc}</h3>\n    <div class=\"meta\">图片URL: ${imgUrl.substring(0, 80)}</div>\n    <div class=\"prompt\" onclick=\"navigator.clipboard.writeText(this.innerText)\" title=\"点击复制\">${prompt}</div>\n    <button class=\"copy-btn\" onclick=\"navigator.clipboard.writeText('${escapedPrompt}'); this.textContent='已复制!'; setTimeout(()=>this.textContent='复制提示词',1500)\">复制提示词</button>\n  </div>\n</div>`;\n}\n\nhtml += `<hr><p style=\"color:#888;text-align:center\">共 ${items.length} 个分镜 | 生成完毕后将视频URL填回 Google Sheets「视频URL」列</p></body></html>`;\n\n// [FIX Bug3] 将 html 字符串转为 Buffer 的 base64，供 readWriteFile 节点使用\nconst htmlBuffer = Buffer.from(html, 'utf8');\n\nreturn [{ json: { data: htmlBuffer.toString('base64'), total_scenes: items.length, fileName: '/tmp/video_workspace/task_list.html' } }];"
+      },
+      "id": "gen-html-012",
+      "name": "生成HTML任务清单",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1980, 400]
+    },
+    {
+      "parameters": {
+        "operation": "write",
+        "fileName": "=/tmp/video_workspace/task_list.html",
+        "options": {
+          "encoding": "base64"
+        }
+      },
+      "id": "write-html-013",
+      "name": "保存HTML文件",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [2200, 400]
+    },
+    {
+      "parameters": {},
+      "id": "trigger2-016",
+      "name": "触发2-粗剪拼接",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [0, 900]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_SPREADSHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": "生产任务",
+        "options": {}
+      },
+      "id": "read-tasks2-017",
+      "name": "读取生产任务(2)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [220, 900],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "Google Sheets OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": ""
+          },
+          "conditions": [
+            {
+              "id": "condition-video-url",
+              "leftValue": "={{ $json['视频URL'] }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "filter-has-video-018",
+      "name": "筛选有视频URL",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [440, 900]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 按分镜序号排序\nconst items = $input.all();\nitems.sort((a, b) => {\n  const numA = parseInt(a.json['分镜序号'] || a.json.scene_number || 0);\n  const numB = parseInt(b.json['分镜序号'] || b.json.scene_number || 0);\n  return numA - numB;\n});\nreturn items;"
+      },
+      "id": "sort-scenes-019",
+      "name": "按分镜序号排序",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, 900]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "loop-videos-020",
+      "name": "遍历视频",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [880, 900]
+    },
+    {
+      "parameters": {
+        "jsCode": "// [FIX Bug2] 此节点仅在 output[0]（还有batch）时执行，下载当前分镜视频\nconst sceneNum = $json['分镜序号'] || $json.scene_number || 0;\nconst videoUrl = $json['视频URL'] || '';\n\nif (!videoUrl) {\n  return [{ json: { error: '视频URL为空', scene_number: sceneNum } }];\n}\n\nconst paddedNum = String(sceneNum).padStart(3, '0');\nconst outputPath = `/tmp/video_workspace/clip_${paddedNum}.mp4`;\n\nconst response = await fetch(videoUrl);\nif (!response.ok) {\n  return [{ json: { error: `下载失败: ${response.status}`, scene_number: sceneNum, output_path: '' } }];\n}\n\nconst arrayBuffer = await response.arrayBuffer();\nconst buffer = Buffer.from(arrayBuffer);\n\nconst fs = require('fs');\nfs.mkdirSync('/tmp/video_workspace', { recursive: true });\nfs.writeFileSync(outputPath, buffer);\n\nreturn [{\n  json: {\n    scene_number: sceneNum,\n    output_path: outputPath,\n    file_size: buffer.length,\n    downloaded: true\n  }\n}];"
+      },
+      "id": "download-clip-023",
+      "name": "下载视频片段",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 900]
+    },
+    {
+      "parameters": {
+        "amount": 2,
+        "unit": "seconds"
+      },
+      "id": "wait-download-024",
+      "name": "下载间等待",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1320, 900]
+    },
+    {
+      "parameters": {
+        "command": "ls /tmp/video_workspace/clip_*.mp4 2>/dev/null | sort | awk '{print \"file \\x27\" $0 \"\\x27\"}' > /tmp/video_workspace/filelist.txt && echo \"文件列表：\" && cat /tmp/video_workspace/filelist.txt"
+      },
+      "id": "gen-filelist-025",
+      "name": "生成文件列表",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [1100, 1100]
+    },
+    {
+      "parameters": {
+        "command": "ffmpeg -y -f concat -safe 0 -i /tmp/video_workspace/filelist.txt -c:v libx264 -c:a aac -movflags +faststart /tmp/video_workspace/final_output.mp4 2>&1 | tail -5"
+      },
+      "id": "ffmpeg-concat-026",
+      "name": "FFmpeg拼接视频",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [1320, 1100]
+    },
+    {
+      "parameters": {
+        "command": "rm -f /tmp/video_workspace/clip_*.mp4 /tmp/video_workspace/filelist.txt && echo '临时文件已清理，粗剪视频：/tmp/video_workspace/final_output.mp4'"
+      },
+      "id": "cleanup-temp-027",
+      "name": "清理临时文件",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [1540, 1100]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "output_path",
+              "name": "output_path",
+              "value": "/tmp/video_workspace/final_output.mp4",
+              "type": "string"
+            },
+            {
+              "id": "message",
+              "name": "message",
+              "value": "粗剪视频已生成，请导入剪映进行精剪",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "output-result-028",
+      "name": "输出结果",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1760, 1100]
+    }
+  ],
+  "connections": {
+    "触发1-生成提示词": {
+      "main": [
+        [
+          {
+            "node": "读取生产任务",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "读取生产任务": {
+      "main": [
+        [
+          {
+            "node": "筛选已生成图片",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "筛选已生成图片": {
+      "main": [
+        [
+          {
+            "node": "遍历分镜",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "遍历分镜": {
+      "main": [
+        [
+          {
+            "node": "Gemini生成视频提示词",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "生成HTML任务清单",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini生成视频提示词": {
+      "main": [
+        [
+          {
+            "node": "等待3秒",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "等待3秒": {
+      "main": [
+        [
+          {
+            "node": "提取视频提示词",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "提取视频提示词": {
+      "main": [
+        [
+          {
+            "node": "更新视频提示词到Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "更新视频提示词到Sheet": {
+      "main": [
+        [
+          {
+            "node": "分镜间等待",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "分镜间等待": {
+      "main": [
+        [
+          {
+            "node": "遍历分镜",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "生成HTML任务清单": {
+      "main": [
+        [
+          {
+            "node": "保存HTML文件",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "触发2-粗剪拼接": {
+      "main": [
+        [
+          {
+            "node": "读取生产任务(2)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "读取生产任务(2)": {
+      "main": [
+        [
+          {
+            "node": "筛选有视频URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "筛选有视频URL": {
+      "main": [
+        [
+          {
+            "node": "按分镜序号排序",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "按分镜序号排序": {
+      "main": [
+        [
+          {
+            "node": "遍历视频",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "遍历视频": {
+      "main": [
+        [
+          {
+            "node": "下载视频片段",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "生成文件列表",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "下载视频片段": {
+      "main": [
+        [
+          {
+            "node": "下载间等待",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "下载间等待": {
+      "main": [
+        [
+          {
+            "node": "遍历视频",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "生成文件列表": {
+      "main": [
+        [
+          {
+            "node": "FFmpeg拼接视频",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FFmpeg拼接视频": {
+      "main": [
+        [
+          {
+            "node": "清理临时文件",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "清理临时文件": {
+      "main": [
+        [
+          {
+            "node": "输出结果",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "视频生产"
+    },
+    {
+      "name": "粗剪"
+    }
+  ],
+  "triggerCount": 0,
+  "updatedAt": "2026-04-18T00:00:00.000Z",
+  "versionId": "2"
+}

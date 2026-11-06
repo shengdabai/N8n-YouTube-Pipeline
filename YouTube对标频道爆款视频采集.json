@@ -1,0 +1,557 @@
+{
+  "name": "YouTube对标频道爆款视频采集",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "manual-trigger-001",
+      "name": "手动触发",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [200, 400]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_SPREADSHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": "对标频道",
+        "options": {}
+      },
+      "id": "read-channels-002",
+      "name": "读取频道列表",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [420, 400],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "Google Sheets OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "loop-channels-003",
+      "name": "遍历频道",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [640, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 从频道链接中提取频道标识\nconst channelLink = $json['频道链接'] || '';\nlet identifier = '';\nlet idType = '';\n\nif (channelLink.includes('@')) {\n  // 提取 @handle 名，如 https://www.youtube.com/@MrBeast → MrBeast\n  const match = channelLink.match(/@([\\w.-]+)/);\n  if (match) {\n    identifier = match[1];\n    idType = 'handle';\n  }\n} else if (channelLink.includes('/channel/')) {\n  // 提取 channel ID，如 https://www.youtube.com/channel/UCX6OQ3DkcsbYNE6H8uQQuVA\n  const match = channelLink.match(/\\/channel\\/([\\w-]+)/);\n  if (match) {\n    identifier = match[1];\n    idType = 'channelId';\n  }\n} else if (channelLink.includes('/c/')) {\n  // 提取自定义名称\n  const match = channelLink.match(/\\/c\\/([\\w.-]+)/);\n  if (match) {\n    identifier = match[1];\n    idType = 'custom';\n  }\n} else {\n  // 尝试从URL路径提取\n  const match = channelLink.match(/youtube\\.com\\/([\\w.-]+)/);\n  if (match && match[1] !== 'watch' && match[1] !== 'playlist') {\n    identifier = match[1];\n    idType = 'handle';\n  }\n}\n\nconst channelName = $json['频道名称'] || '';\n\nreturn [{\n  json: {\n    identifier: identifier,\n    idType: idType,\n    channelName: channelName,\n    channelLink: channelLink\n  }\n}];"
+      },
+      "id": "extract-channel-id-004",
+      "name": "提取频道标识",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [860, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": ""
+          },
+          "conditions": [
+            {
+              "id": "condition-has-identifier",
+              "leftValue": "={{ $json.idType }}",
+              "rightValue": "channelId",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "check-id-type-005",
+      "name": "判断标识类型",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1080, 400]
+    },
+    {
+      "parameters": {
+        "url": "=https://www.googleapis.com/youtube/v3/channels?part=contentDetails&id={{ $json.identifier }}&key=YOUR_YOUTUBE_API_KEY",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "direct-channel-006",
+      "name": "直接获取频道信息",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1300, 300],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "=https://www.googleapis.com/youtube/v3/search?part=snippet&type=channel&maxResults=1&q={{ encodeURIComponent($json.identifier) }}&key=YOUR_YOUTUBE_API_KEY",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "search-channel-007",
+      "name": "搜索频道ID",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1300, 520],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// 统一处理：从两种路径获取 channelId 和 uploads playlistId\nconst items = $input.first().json.items || [];\nlet channelId = '';\n\nif (items.length > 0) {\n  // contentDetails 直接返回的结构\n  if (items[0].id) {\n    channelId = items[0].id;\n  } else if (items[0].snippet && items[0].snippet.channelId) {\n    // search 返回的结构\n    channelId = items[0].snippet.channelId;\n  }\n}\n\n// 获取之前的上下文\nconst prevData = $('提取频道标识').item.json;\nconst channelName = prevData.channelName || '';\n\nif (!channelId) {\n  return [{ json: { channelId: '', uploadsPlaylistId: '', channelName: channelName, error: '未找到频道ID' } }];\n}\n\nreturn [{\n  json: {\n    channelId: channelId,\n    channelName: channelName\n  }\n}];"
+      },
+      "id": "normalize-channel-008",
+      "name": "统一频道ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1520, 400]
+    },
+    {
+      "parameters": {
+        "url": "=https://www.googleapis.com/youtube/v3/channels?part=contentDetails&id={{ $json.channelId }}&key=YOUR_YOUTUBE_API_KEY",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "get-uploads-009",
+      "name": "获取上传播放列表ID",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1740, 400],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// 提取 uploads playlistId，初始化分页状态\nconst items = $input.first().json.items || [];\nconst channelName = $('统一频道ID').item.json.channelName || '';\n\nlet uploadsPlaylistId = '';\nif (items.length > 0 && items[0].contentDetails && items[0].contentDetails.relatedPlaylists) {\n  uploadsPlaylistId = items[0].contentDetails.relatedPlaylists.uploads || '';\n}\n\nif (!uploadsPlaylistId) {\n  return [{ json: { error: '未找到上传播放列表', allVideoIds: [], channelName: channelName } }];\n}\n\nreturn [{\n  json: {\n    playlistId: uploadsPlaylistId,\n    pageToken: '',\n    collectedVideoIds: [],\n    channelName: channelName\n  }\n}];"
+      },
+      "id": "init-pagination-010",
+      "name": "初始化分页",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1960, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 获取视频列表（支持分页循环，最多100条）\nconst apiKey = 'YOUR_YOUTUBE_API_KEY';\nconst data = $input.first().json;\nconst playlistId = data.playlistId;\nconst existingIds = data.collectedVideoIds || [];\nconst pageToken = data.pageToken || '';\nconst channelName = data.channelName || '';\n\n// 构建URL\nlet url = `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&playlistId=${playlistId}&key=${apiKey}`;\nif (pageToken) {\n  url += `&pageToken=${pageToken}`;\n}\n\n// 使用 fetch 获取数据（n8n Code 节点支持 fetch）\nconst response = await fetch(url);\nconst result = await response.json();\n\n// 收集本页视频ID\nconst newIds = (result.items || [])\n  .map(item => item.snippet?.resourceId?.videoId)\n  .filter(id => id);\n\nconst allIds = [...existingIds, ...newIds];\nconst nextPageToken = result.nextPageToken || '';\nconst totalResults = result.pageInfo?.totalResults || 0;\n\n// 判断是否继续：有下一页 且 已收集不足100条\nconst hasMore = nextPageToken && allIds.length < 100;\n\nreturn [{\n  json: {\n    playlistId: playlistId,\n    pageToken: hasMore ? nextPageToken : '',\n    collectedVideoIds: allIds,\n    hasMore: hasMore,\n    channelName: channelName\n  }\n}];"
+      },
+      "id": "fetch-videos-011",
+      "name": "获取视频列表(循环)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2180, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": ""
+          },
+          "conditions": [
+            {
+              "id": "condition-has-more",
+              "leftValue": "={{ $json.hasMore }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "check-more-pages-012",
+      "name": "是否继续翻页",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2400, 400]
+    },
+    {
+      "parameters": {
+        "amount": 2,
+        "unit": "seconds"
+      },
+      "id": "wait-between-pages-013",
+      "name": "翻页等待",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [2620, 280]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 批量获取视频详情（每批最多50个）\nconst apiKey = 'YOUR_YOUTUBE_API_KEY';\nconst data = $input.first().json;\nconst videoIds = data.collectedVideoIds || [];\nconst channelName = data.channelName || '';\n\nif (videoIds.length === 0) {\n  return [{ json: { videos: [], channelName: channelName } }];\n}\n\n// 分批请求（每批最多50个ID）\nconst allVideos = [];\nfor (let i = 0; i < videoIds.length; i += 50) {\n  const batch = videoIds.slice(i, i + 50);\n  const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet,statistics&id=${batch.join(',')}&key=${apiKey}`;\n  \n  const response = await fetch(url);\n  const result = await response.json();\n  \n  for (const video of (result.items || [])) {\n    allVideos.push({\n      频道名: channelName,\n      视频标题: video.snippet?.title || '',\n      播放量: parseInt(video.statistics?.viewCount || '0'),\n      发布时间: video.snippet?.publishedAt || '',\n      视频链接: `https://youtube.com/watch?v=${video.id}`,\n      点赞数: parseInt(video.statistics?.likeCount || '0'),\n      评论数: parseInt(video.statistics?.commentCount || '0')\n    });\n  }\n}\n\nreturn allVideos.map(v => ({ json: v }));"
+      },
+      "id": "get-details-format-014",
+      "name": "获取详情并格式化",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2620, 520]
+    },
+    {
+      "parameters": {
+        "amount": 2,
+        "unit": "seconds"
+      },
+      "id": "wait-between-channels-015",
+      "name": "频道间等待",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [2840, 520]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 汇总所有频道的视频数据，按播放量降序排序\nconst allVideos = $input.all().map(item => item.json);\n\n// 按播放量降序排列\nallVideos.sort((a, b) => (b.播放量 || 0) - (a.播放量 || 0));\n\nreturn allVideos.map(video => ({ json: video }));"
+      },
+      "id": "sort-results-016",
+      "name": "按播放量排序",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3060, 400]
+    },
+    {
+      "parameters": {
+        "operation": "clear",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_SPREADSHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": "爆款视频",
+        "options": {}
+      },
+      "id": "clear-sheet-017",
+      "name": "清空旧数据",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [3280, 400],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "Google Sheets OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_SPREADSHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": "爆款视频",
+        "columns": {
+          "mappingValues": [
+            {
+              "column": "频道名",
+              "value": "={{ $json.频道名 }}"
+            },
+            {
+              "column": "视频标题",
+              "value": "={{ $json.视频标题 }}"
+            },
+            {
+              "column": "播放量",
+              "value": "={{ $json.播放量 }}"
+            },
+            {
+              "column": "发布时间",
+              "value": "={{ $json.发布时间 }}"
+            },
+            {
+              "column": "视频链接",
+              "value": "={{ $json.视频链接 }}"
+            },
+            {
+              "column": "点赞数",
+              "value": "={{ $json.点赞数 }}"
+            },
+            {
+              "column": "评论数",
+              "value": "={{ $json.评论数 }}"
+            }
+          ]
+        },
+        "options": {
+          "cellFormat": "USER_ENTERED",
+          "valueInputMode": "RAW"
+        }
+      },
+      "id": "write-results-018",
+      "name": "写入爆款视频",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [3500, 400],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "Google Sheets OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## YouTube 对标频道爆款视频采集\n\n### 使用前请替换以下内容：\n\n1. **YOUR_YOUTUBE_API_KEY** → 你的 YouTube Data API v3 Key\n   （Google Cloud Console → APIs & Services → Credentials 创建）\n\n2. **YOUR_SPREADSHEET_ID** → 你的 Google Sheets 电子表格 ID\n   （从 URL 中获取：`https://docs.google.com/spreadsheets/d/这里就是ID/edit`）\n\n3. **YOUR_CREDENTIAL_ID** → n8n 中 Google Sheets OAuth2 凭证\n   （在 n8n Credentials 页面创建后获取）\n\n### Google Sheets 格式要求：\n\n- Sheet「对标频道」：A列=频道名称，B列=频道链接\n- Sheet「爆款视频」：自动写入（运行前清空旧数据）\n\n### API 配额说明：\n\n- YouTube Data API v3 免费配额：10,000 单位/天\n- 每个频道约消耗 100-200 单位\n- 建议频道数量控制在 50 个以内",
+        "height": 340,
+        "width": 400,
+        "color": 4
+      },
+      "id": "sticky-note-019",
+      "name": "使用说明",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-200, 200]
+    }
+  ],
+  "connections": {
+    "手动触发": {
+      "main": [
+        [
+          {
+            "node": "读取频道列表",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "读取频道列表": {
+      "main": [
+        [
+          {
+            "node": "遍历频道",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "遍历频道": {
+      "main": [
+        [
+          {
+            "node": "提取频道标识",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "按播放量排序",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "提取频道标识": {
+      "main": [
+        [
+          {
+            "node": "判断标识类型",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "判断标识类型": {
+      "main": [
+        [
+          {
+            "node": "直接获取频道信息",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "搜索频道ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "直接获取频道信息": {
+      "main": [
+        [
+          {
+            "node": "统一频道ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "搜索频道ID": {
+      "main": [
+        [
+          {
+            "node": "统一频道ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "统一频道ID": {
+      "main": [
+        [
+          {
+            "node": "获取上传播放列表ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "获取上传播放列表ID": {
+      "main": [
+        [
+          {
+            "node": "初始化分页",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "初始化分页": {
+      "main": [
+        [
+          {
+            "node": "获取视频列表(循环)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "获取视频列表(循环)": {
+      "main": [
+        [
+          {
+            "node": "是否继续翻页",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "是否继续翻页": {
+      "main": [
+        [
+          {
+            "node": "翻页等待",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "获取详情并格式化",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "翻页等待": {
+      "main": [
+        [
+          {
+            "node": "获取视频列表(循环)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "获取详情并格式化": {
+      "main": [
+        [
+          {
+            "node": "频道间等待",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "频道间等待": {
+      "main": [
+        [
+          {
+            "node": "遍历频道",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "按播放量排序": {
+      "main": [
+        [
+          {
+            "node": "清空旧数据",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "清空旧数据": {
+      "main": [
+        [
+          {
+            "node": "写入爆款视频",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "YouTube"
+    },
+    {
+      "name": "竞品分析"
+    }
+  ],
+  "triggerCount": 0,
+  "updatedAt": "2026-04-18T00:00:00.000Z",
+  "versionId": "2"
+}

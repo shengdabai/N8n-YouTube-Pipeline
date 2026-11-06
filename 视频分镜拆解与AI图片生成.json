@@ -1,0 +1,609 @@
+{
+  "name": "视频分镜拆解与AI图片生成",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "manual-trigger-001",
+      "name": "手动触发",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [200, 400]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": {
+          "enabled": false
+        },
+        "assignments": {
+          "assignments": [
+            {
+              "id": "video_url",
+              "name": "video_url",
+              "value": "https://www.youtube.com/watch?v=EXAMPLE",
+              "type": "string"
+            },
+            {
+              "id": "replace_from",
+              "name": "replace_from",
+              "value": "cat",
+              "type": "string"
+            },
+            {
+              "id": "replace_to",
+              "name": "replace_to",
+              "value": "golden retriever dog",
+              "type": "string"
+            },
+            {
+              "id": "style_keywords",
+              "name": "style_keywords",
+              "value": "cinematic, nature documentary, 4K, warm lighting",
+              "type": "string"
+            },
+            {
+              "id": "num_scenes",
+              "name": "num_scenes",
+              "value": 10,
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "input-params-002",
+      "name": "输入参数",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [420, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=YOUR_GEMINI_API_KEY",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"contents\": [\n    {\n      \"parts\": [\n        {\n          \"text\": \"你是一位专业的视频分镜师。请分析以下 YouTube 视频，将其拆解为{{ $json.num_scenes }}个关键分镜。\\n\\nYouTube 视频链接：{{ $json.video_url }}\\n\\n请严格按以下 JSON 数组格式输出，不要输出任何其他内容：\\n[\\n  {\\n    \\\"scene_number\\\": 1,\\n    \\\"timestamp\\\": \\\"0:00-0:03\\\",\\n    \\\"description_cn\\\": \\\"中文画面描述\\\",\\n    \\\"text_to_image_prompt\\\": \\\"detailed English prompt for image generation, including composition, lighting, color palette, subject details, background, style\\\",\\n    \\\"mood\\\": \\\"氛围\\\",\\n    \\\"camera_movement\\\": \\\"如 static, slow zoom in, pan left, tracking shot\\\"\\n  }\\n]\\n\\n要求：\\n1. text_to_image_prompt 必须是英文，50-100词，足够详细以独立生成高质量图片\\n2. 覆盖视频的关键镜头，不遗漏重要画面\\n3. 每个提示词必须包含：主体描述、动作/姿态、环境、光线、构图、画面风格\\n4. 如果无法访问视频URL，根据链接中的标题/描述合理推断内容并生成分镜\"\n        }\n      ]\n    }\n  ],\n  \"generationConfig\": {\n    \"temperature\": 0.3,\n    \"responseMimeType\": \"application/json\"\n  }\n}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "gemini-split-003",
+      "name": "Gemini拆分镜",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [640, 400],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "amount": 3,
+        "unit": "seconds"
+      },
+      "id": "wait-after-split-004",
+      "name": "等待3秒",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [860, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 解析 Gemini 返回的分镜 JSON\nconst response = $input.first().json;\nconst inputParams = $('输入参数').item.json;\n\nlet scenes = [];\n\ntry {\n  const text = response.candidates?.[0]?.content?.parts?.[0]?.text || '';\n  // 尝试提取 JSON 数组（可能被 markdown 代码块包裹）\n  const jsonMatch = text.match(/\\[\\s*\\{[\\s\\S]*\\}\\s*\\]/);\n  if (jsonMatch) {\n    scenes = JSON.parse(jsonMatch[0]);\n  } else {\n    scenes = JSON.parse(text);\n  }\n} catch (e) {\n  // 如果解析失败，创建一个错误提示\n  scenes = [{\n    scene_number: 0,\n    timestamp: 'error',\n    description_cn: '分镜解析失败: ' + e.message,\n    text_to_image_prompt: 'error parsing scenes',\n    mood: '',\n    camera_movement: ''\n  }];\n}\n\nreturn scenes.map(scene => ({\n  json: {\n    ...scene,\n    video_url: inputParams.video_url,\n    replace_from: inputParams.replace_from,\n    replace_to: inputParams.replace_to,\n    style_keywords: inputParams.style_keywords\n  }\n}));"
+      },
+      "id": "parse-scenes-005",
+      "name": "解析分镜JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1080, 400]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "loop-scenes-006",
+      "name": "遍历分镜",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [1300, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=YOUR_GEMINI_API_KEY",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"contents\": [\n    {\n      \"parts\": [\n        {\n          \"text\": \"将以下图片生成提示词中的 '{{ $json.replace_from }}' 相关元素替换为 '{{ $json.replace_to }}'。这不是简单的文本替换，而是语义级替换——需要调整动作、姿态、场景细节以适配新的主体。同时在提示词末尾追加以下风格关键词：{{ $json.style_keywords }}。\\n\\n只输出替换后的完整英文提示词，不要任何解释、编号或标签。\\n\\n原始提示词：{{ $json.text_to_image_prompt }}\"\n        }\n      ]\n    }\n  ],\n  \"generationConfig\": {\n    \"temperature\": 0.2\n  }\n}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "gemini-replace-007",
+      "name": "Gemini元素替换",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1520, 400],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "amount": 3,
+        "unit": "seconds"
+      },
+      "id": "wait-after-replace-008",
+      "name": "替换后等待",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1740, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 提取替换后的提示词\nconst response = $input.first().json;\nconst sceneData = $('遍历分镜').item.json;\n\nlet replacedPrompt = '';\ntry {\n  replacedPrompt = response.candidates?.[0]?.content?.parts?.[0]?.text || sceneData.text_to_image_prompt;\n  replacedPrompt = replacedPrompt.trim();\n} catch (e) {\n  replacedPrompt = sceneData.text_to_image_prompt;\n}\n\nreturn [{\n  json: {\n    scene_number: sceneData.scene_number,\n    timestamp: sceneData.timestamp,\n    description_cn: sceneData.description_cn,\n    text_to_image_prompt: sceneData.text_to_image_prompt,\n    replaced_prompt: replacedPrompt,\n    mood: sceneData.mood,\n    camera_movement: sceneData.camera_movement,\n    video_url: sceneData.video_url,\n    replace_from: sceneData.replace_from,\n    replace_to: sceneData.replace_to\n  }\n}];"
+      },
+      "id": "extract-replaced-009",
+      "name": "提取替换提示词",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1960, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8000/v1/images/generations",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer sk-no-key-required"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"jimeng-5.0\",\n  \"prompt\": \"{{ $json.replaced_prompt }}\",\n  \"size\": \"1920x1080\",\n  \"n\": 1\n}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "jimeng-gen-010",
+      "name": "即梦文生图",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2180, 400],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": ""
+          },
+          "conditions": [
+            {
+              "id": "condition-has-image",
+              "leftValue": "={{ $json.data && $json.data.length > 0 && $json.data[0].url }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "check-image-011",
+      "name": "检查图片是否生成",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2400, 400]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "image_url",
+              "name": "image_url",
+              "value": "={{ $json.data[0].url }}",
+              "type": "string"
+            },
+            {
+              "id": "status",
+              "name": "status",
+              "value": "图片已生成",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "set-success-012",
+      "name": "设置成功状态",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [2620, 300]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "image_url",
+              "name": "image_url",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "status",
+              "name": "status",
+              "value": "待手动生图",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "set-fail-013",
+      "name": "设置待手动状态",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [2620, 520]
+    },
+    {
+      "parameters": {
+        "mode": "append",
+        "options": {}
+      },
+      "id": "merge-status-014",
+      "name": "合并状态",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [2840, 400]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_SPREADSHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": "生产任务",
+        "columns": {
+          "mappingValues": [
+            {
+              "column": "原视频链接",
+              "value": "={{ $('提取替换提示词').item.json.video_url }}"
+            },
+            {
+              "column": "分镜序号",
+              "value": "={{ $('提取替换提示词').item.json.scene_number }}"
+            },
+            {
+              "column": "画面描述",
+              "value": "={{ $('提取替换提示词').item.json.description_cn }}"
+            },
+            {
+              "column": "原始提示词",
+              "value": "={{ $('提取替换提示词').item.json.text_to_image_prompt }}"
+            },
+            {
+              "column": "替换后提示词",
+              "value": "={{ $('提取替换提示词').item.json.replaced_prompt }}"
+            },
+            {
+              "column": "图片URL",
+              "value": "={{ $json.image_url }}"
+            },
+            {
+              "column": "视频提示词",
+              "value": ""
+            },
+            {
+              "column": "视频URL",
+              "value": ""
+            },
+            {
+              "column": "状态",
+              "value": "={{ $json.status }}"
+            }
+          ]
+        },
+        "options": {
+          "cellFormat": "USER_ENTERED",
+          "valueInputMode": "RAW"
+        }
+      },
+      "id": "write-sheet-015",
+      "name": "写入生产任务",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [3060, 400],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "Google Sheets OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "amount": 5,
+        "unit": "seconds"
+      },
+      "id": "wait-between-scenes-016",
+      "name": "分镜间等待",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [3280, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 生成手动操作文档：筛选待手动生图的分镜\nconst allItems = $input.all();\nconst manualItems = allItems.filter(item => item.json.status === '待手动生图');\n\nif (manualItems.length === 0) {\n  return [{ json: { manual_doc: '所有分镜图片已自动生成，无需手动操作。', has_manual_tasks: false } }];\n}\n\nlet doc = '=== 待手动生图分镜清单 ===\\n\\n';\nfor (const item of manualItems) {\n  const d = item.json;\n  doc += `--- 分镜 ${d.scene_number || '?'} ---\\n`;\n  doc += `画面描述：${d.description_cn || ''}\\n`;\n  doc += `提示词：${d.replaced_prompt || d.text_to_image_prompt || ''}\\n\\n`;\n}\n\ndoc += `\\n共 ${manualItems.length} 个分镜需要手动生成图片。\\n请复制提示词到即梦/LiblibAI网页端生成后，将图片URL填回Google Sheets。`;\n\nreturn [{ json: { manual_doc: doc, has_manual_tasks: true, manual_count: manualItems.length } }];"
+      },
+      "id": "manual-doc-017",
+      "name": "生成手动操作文档",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3500, 400]
+    },
+    {
+      "parameters": {
+        "content": "## 视频分镜拆解与AI图片生成\n\n### 使用前请替换：\n\n1. **YOUR_GEMINI_API_KEY** → Google AI Studio 获取的免费 API Key\n   （https://aistudio.google.com/apikey）\n\n2. **YOUR_SPREADSHEET_ID** → Google Sheets 电子表格 ID\n   （从 URL 中获取）\n\n3. **YOUR_CREDENTIAL_ID** → n8n 中 Google Sheets OAuth2 凭证\n\n### 前置条件：\n- Docker 即梦 API 正在运行（端口 8000）\n- Google Sheets 中已创建「生产任务」Sheet\n\n### 如果即梦积分用完：\n- 查看生产任务 Sheet 中「待手动生图」的行\n- 复制替换后提示词到即梦/LiblibAI 网页端生成\n- 将图片 URL 填回 Sheet\n\n### API 配额：\n- Gemini 免费：每天 1,500 次\n- 每个视频约消耗 20-30 次\n- 即梦每次生成约 2-5 秒",
+        "height": 380,
+        "width": 400,
+        "color": 4
+      },
+      "id": "sticky-note-018",
+      "name": "使用说明",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-200, 200]
+    }
+  ],
+  "connections": {
+    "手动触发": {
+      "main": [
+        [
+          {
+            "node": "输入参数",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "输入参数": {
+      "main": [
+        [
+          {
+            "node": "Gemini拆分镜",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini拆分镜": {
+      "main": [
+        [
+          {
+            "node": "等待3秒",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "等待3秒": {
+      "main": [
+        [
+          {
+            "node": "解析分镜JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "解析分镜JSON": {
+      "main": [
+        [
+          {
+            "node": "遍历分镜",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "遍历分镜": {
+      "main": [
+        [
+          {
+            "node": "Gemini元素替换",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "生成手动操作文档",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini元素替换": {
+      "main": [
+        [
+          {
+            "node": "替换后等待",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "替换后等待": {
+      "main": [
+        [
+          {
+            "node": "提取替换提示词",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "提取替换提示词": {
+      "main": [
+        [
+          {
+            "node": "即梦文生图",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "即梦文生图": {
+      "main": [
+        [
+          {
+            "node": "检查图片是否生成",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "检查图片是否生成": {
+      "main": [
+        [
+          {
+            "node": "设置成功状态",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "设置待手动状态",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "设置成功状态": {
+      "main": [
+        [
+          {
+            "node": "合并状态",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "设置待手动状态": {
+      "main": [
+        [
+          {
+            "node": "合并状态",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "合并状态": {
+      "main": [
+        [
+          {
+            "node": "写入生产任务",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "写入生产任务": {
+      "main": [
+        [
+          {
+            "node": "分镜间等待",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "分镜间等待": {
+      "main": [
+        [
+          {
+            "node": "遍历分镜",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "视频生产"
+    },
+    {
+      "name": "分镜"
+    }
+  ],
+  "triggerCount": 0,
+  "updatedAt": "2026-04-18T00:00:00.000Z",
+  "versionId": "1"
+}
