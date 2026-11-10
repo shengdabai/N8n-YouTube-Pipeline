@@ -118,7 +118,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// 统一处理：从两种路径获取 channelId 和 uploads playlistId\nconst items = $input.first().json.items || [];\nlet channelId = '';\n\nif (items.length > 0) {\n  // contentDetails 直接返回的结构\n  if (items[0].id) {\n    channelId = items[0].id;\n  } else if (items[0].snippet && items[0].snippet.channelId) {\n    // search 返回的结构\n    channelId = items[0].snippet.channelId;\n  }\n}\n\n// 获取之前的上下文\nconst prevData = $('提取频道标识').item.json;\nconst channelName = prevData.channelName || '';\n\nif (!channelId) {\n  return [{ json: { channelId: '', uploadsPlaylistId: '', channelName: channelName, error: '未找到频道ID' } }];\n}\n\nreturn [{\n  json: {\n    channelId: channelId,\n    channelName: channelName\n  }\n}];"
+        "jsCode": "// 统一处理：从两种路径获取 channelId 和 uploads playlistId\nconst items = $input.first().json.items || [];\nlet channelId = '';\n\nif (items.length > 0) {\n  // contentDetails 直接返回的结构\n  if (typeof items[0].id === 'string') {\n    channelId = items[0].id;\n  } else if (typeof items[0].id?.channelId === 'string') {\n    channelId = items[0].id.channelId;\n  } else if (items[0].snippet && items[0].snippet.channelId) {\n    // search 返回的结构\n    channelId = items[0].snippet.channelId;\n  }\n}\n\n// 获取之前的上下文\nconst prevData = $('提取频道标识').item.json;\nconst channelName = prevData.channelName || '';\n\nif (!channelId) {\n  throw new Error('未找到频道ID');\n}\n\nreturn [{\n  json: {\n    channelId: channelId,\n    channelName: channelName\n  }\n}];"
       },
       "id": "normalize-channel-008",
       "name": "统一频道ID",
@@ -146,7 +146,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// 提取 uploads playlistId，初始化分页状态\nconst items = $input.first().json.items || [];\nconst channelName = $('统一频道ID').item.json.channelName || '';\n\nlet uploadsPlaylistId = '';\nif (items.length > 0 && items[0].contentDetails && items[0].contentDetails.relatedPlaylists) {\n  uploadsPlaylistId = items[0].contentDetails.relatedPlaylists.uploads || '';\n}\n\nif (!uploadsPlaylistId) {\n  return [{ json: { error: '未找到上传播放列表', allVideoIds: [], channelName: channelName } }];\n}\n\nreturn [{\n  json: {\n    playlistId: uploadsPlaylistId,\n    pageToken: '',\n    collectedVideoIds: [],\n    channelName: channelName\n  }\n}];"
+        "jsCode": "// 提取 uploads playlistId，初始化分页状态\nconst items = $input.first().json.items || [];\nconst channelName = $('统一频道ID').item.json.channelName || '';\n\nlet uploadsPlaylistId = '';\nif (items.length > 0 && items[0].contentDetails && items[0].contentDetails.relatedPlaylists) {\n  uploadsPlaylistId = items[0].contentDetails.relatedPlaylists.uploads || '';\n}\n\nif (!uploadsPlaylistId) {\n  throw new Error('未找到上传播放列表');\n}\n\nreturn [{\n  json: {\n    playlistId: uploadsPlaylistId,\n    pageToken: '',\n    collectedVideoIds: [],\n    channelName: channelName\n  }\n}];"
       },
       "id": "init-pagination-010",
       "name": "初始化分页",
@@ -156,7 +156,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// 获取视频列表（支持分页循环，最多100条）\nconst apiKey = 'YOUR_YOUTUBE_API_KEY';\nconst data = $input.first().json;\nconst playlistId = data.playlistId;\nconst existingIds = data.collectedVideoIds || [];\nconst pageToken = data.pageToken || '';\nconst channelName = data.channelName || '';\n\n// 构建URL\nlet url = `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&playlistId=${playlistId}&key=${apiKey}`;\nif (pageToken) {\n  url += `&pageToken=${pageToken}`;\n}\n\n// 使用 fetch 获取数据（n8n Code 节点支持 fetch）\nconst response = await fetch(url);\nconst result = await response.json();\n\n// 收集本页视频ID\nconst newIds = (result.items || [])\n  .map(item => item.snippet?.resourceId?.videoId)\n  .filter(id => id);\n\nconst allIds = [...existingIds, ...newIds];\nconst nextPageToken = result.nextPageToken || '';\nconst totalResults = result.pageInfo?.totalResults || 0;\n\n// 判断是否继续：有下一页 且 已收集不足100条\nconst hasMore = nextPageToken && allIds.length < 100;\n\nreturn [{\n  json: {\n    playlistId: playlistId,\n    pageToken: hasMore ? nextPageToken : '',\n    collectedVideoIds: allIds,\n    hasMore: hasMore,\n    channelName: channelName\n  }\n}];"
+        "jsCode": "// 获取视频列表（支持分页循环，最多100条）\nconst apiKey = 'YOUR_YOUTUBE_API_KEY';\nconst data = $input.first().json;\nconst playlistId = data.playlistId;\nconst existingIds = data.collectedVideoIds || [];\nconst pageToken = data.pageToken || '';\nconst channelName = data.channelName || '';\n\n// 构建URL\nlet url = `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&playlistId=${playlistId}&key=${apiKey}`;\nif (pageToken) {\n  url += `&pageToken=${pageToken}`;\n}\n\n// 使用 fetch 获取数据（n8n Code 节点支持 fetch）\nconst response = await fetch(url);\nif (!response.ok) throw new Error(`YouTube API请求失败: ${response.status}`);\nconst result = await response.json();\n\n// 收集本页视频ID\nconst newIds = (result.items || [])\n  .map(item => item.snippet?.resourceId?.videoId)\n  .filter(id => id);\n\nconst allIds = [...existingIds, ...newIds];\nconst nextPageToken = result.nextPageToken || '';\nconst totalResults = result.pageInfo?.totalResults || 0;\n\n// 判断是否继续：有下一页 且 已收集不足100条\nconst hasMore = nextPageToken && allIds.length < 100;\n\nreturn [{\n  json: {\n    playlistId: playlistId,\n    pageToken: hasMore ? nextPageToken : '',\n    collectedVideoIds: allIds,\n    hasMore: hasMore,\n    channelName: channelName\n  }\n}];"
       },
       "id": "fetch-videos-011",
       "name": "获取视频列表(循环)",
@@ -204,7 +204,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// 批量获取视频详情（每批最多50个）\nconst apiKey = 'YOUR_YOUTUBE_API_KEY';\nconst data = $input.first().json;\nconst videoIds = data.collectedVideoIds || [];\nconst channelName = data.channelName || '';\n\nif (videoIds.length === 0) {\n  return [{ json: { videos: [], channelName: channelName } }];\n}\n\n// 分批请求（每批最多50个ID）\nconst allVideos = [];\nfor (let i = 0; i < videoIds.length; i += 50) {\n  const batch = videoIds.slice(i, i + 50);\n  const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet,statistics&id=${batch.join(',')}&key=${apiKey}`;\n  \n  const response = await fetch(url);\n  const result = await response.json();\n  \n  for (const video of (result.items || [])) {\n    allVideos.push({\n      频道名: channelName,\n      视频标题: video.snippet?.title || '',\n      播放量: parseInt(video.statistics?.viewCount || '0'),\n      发布时间: video.snippet?.publishedAt || '',\n      视频链接: `https://youtube.com/watch?v=${video.id}`,\n      点赞数: parseInt(video.statistics?.likeCount || '0'),\n      评论数: parseInt(video.statistics?.commentCount || '0')\n    });\n  }\n}\n\nreturn allVideos.map(v => ({ json: v }));"
+        "jsCode": "// 批量获取视频详情（每批最多50个）\nconst apiKey = 'YOUR_YOUTUBE_API_KEY';\nconst data = $input.first().json;\nconst videoIds = data.collectedVideoIds || [];\nconst channelName = data.channelName || '';\n\nif (videoIds.length === 0) {\n  return [{ json: { videos: [], channelName: channelName } }];\n}\n\n// 分批请求（每批最多50个ID）\nconst allVideos = [];\nfor (let i = 0; i < videoIds.length; i += 50) {\n  const batch = videoIds.slice(i, i + 50);\n  const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet,statistics&id=${batch.join(',')}&key=${apiKey}`;\n  \n  const response = await fetch(url);\n  if (!response.ok) throw new Error(`YouTube API请求失败: ${response.status}`);\n  const result = await response.json();\n  \n  for (const video of (result.items || [])) {\n    allVideos.push({\n      频道名: channelName,\n      视频标题: video.snippet?.title || '',\n      播放量: parseInt(video.statistics?.viewCount || '0'),\n      发布时间: video.snippet?.publishedAt || '',\n      视频链接: `https://youtube.com/watch?v=${video.id}`,\n      点赞数: parseInt(video.statistics?.likeCount || '0'),\n      评论数: parseInt(video.statistics?.commentCount || '0')\n    });\n  }\n}\n\nreturn allVideos.map(v => ({ json: v }));"
       },
       "id": "get-details-format-014",
       "name": "获取详情并格式化",
@@ -355,14 +355,14 @@
       "main": [
         [
           {
-            "node": "提取频道标识",
+            "node": "按播放量排序",
             "type": "main",
             "index": 0
           }
         ],
         [
           {
-            "node": "按播放量排序",
+            "node": "提取频道标识",
             "type": "main",
             "index": 0
           }
