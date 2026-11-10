@@ -3,7 +3,7 @@
   "nodes": [
     {
       "parameters": {
-        "content": "## 分镜视频生成与自动粗剪\n\n### 本工作流分两段运行：\n\n**【第一段】点击上方触发器「触发1-生成提示词」**\n- 自动读取「图片已生成」的分镜\n- 用 Gemini 为每张图片生成图生视频提示词\n- 更新 Google Sheets 的「视频提示词」列\n- 生成 HTML 任务清单（含图片+提示词，可一键复制）\n- 打开 /tmp/video_workspace/task_list.html\n- 逐个到 PixVerse/即梦网页端上传图片 + 粘贴提示词生成视频\n- 将视频 URL 填回 Google Sheets 的「视频URL」列\n\n**【第二段】所有视频URL填完后，点击下方触发器「触发2-粗剪拼接」**\n- 自动下载所有视频并按分镜序号排序\n- FFmpeg 拼接为完整粗剪视频\n- 输出到 /tmp/video_workspace/final_output.mp4\n- 需要精剪的再导入剪映手动调整\n\n### 需要替换：\n1. **YOUR_GEMINI_API_KEY** → Google AI Studio API Key\n2. **YOUR_SPREADSHEET_ID** → Google Sheets ID\n3. **YOUR_CREDENTIAL_ID** → n8n Google Sheets OAuth2 凭证",
+        "content": "## 分镜视频生成与自动粗剪\n\n### 本工作流分两段运行：\n\n**【第一段】点击上方触发器「触发1-生成提示词」**\n- 自动读取「图片已生成」的分镜\n- 用 Gemini 为每张图片生成图生视频提示词\n- 更新 Google Sheets 的「视频提示词」列\n- 生成 HTML 任务清单（含图片+提示词，可一键复制）\n- 打开 /tmp/video_workspace/task_list.html\n- 逐个到 PixVerse/即梦网页端上传图片 + 粘贴提示词生成视频\n- 将视频 URL 填回 Google Sheets 的「视频URL」列\n\n**【第二段】所有视频URL填完后，点击下方触发器「触发2-粗剪拼接」**\n- 自动下载所有视频并按分镜序号排序\n- FFmpeg 拼接为完整粗剪视频\n- 输出到 本次执行的 /tmp/video_workspace-*/final_output.mp4（路径见「输出结果」）\n- 需要精剪的再导入剪映手动调整\n\n### 需要替换：\n1. **YOUR_GEMINI_API_KEY** → Google AI Studio API Key\n2. **YOUR_SPREADSHEET_ID** → Google Sheets ID\n3. **YOUR_CREDENTIAL_ID** → n8n Google Sheets OAuth2 凭证\n\n### 下载安全与运行环境：\n- 将「下载视频片段」中的 YOUR_TRUSTED_VIDEO_CDN_HOST 替换为经审核的准确公网 CDN 主机名；不要使用用户自定义或内网域名。仅允许 HTTPS 443，不跟随重定向；连接固定到校验后的公网 IPv4 地址。\n- 自托管 n8n 需为 Code 节点显式允许 fs、url、https、dns、net 内置模块，并提供 FFmpeg / Execute Command 节点；此模板不适用于 n8n Cloud。\n- 每个视频限制 100 MiB、60 秒；失败会停止拼接并保留本次工作目录供排查。",
         "height": 460,
         "width": 420,
         "color": 4
@@ -107,7 +107,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"contents\": [\n    {\n      \"parts\": [\n        {\n          \"text\": \"你是一位专业的AI视频导演。根据以下分镜信息，为一张静态图片生成一段'图生视频'提示词（用于 PixVerse / 即梦等AI视频工具）。\\n\\n核心规则：\\n1. 绝对不要描述图片中已有的静态元素（AI视频模型会自动参考原图）\\n2. 只描述以下动态要素：\\n   - 镜头运动：如 slow zoom in, dolly out, pan left to right, tracking shot, crane up, handheld shake, static shot\\n   - 主体动作：具体的动作和运动轨迹，如 'slowly turns head to the left, ears perked up, then begins trotting forward'\\n   - 环境动态：如 gentle breeze rustling grass, dappled sunlight shifting, water rippling, dust particles floating\\n   - 运动节奏：如 slow motion, normal speed, gradually accelerating, smooth and steady\\n3. 长度：30-50个英文单词\\n4. 只输出纯英文提示词，不要编号、标签、解释\\n\\n参考信息：\\n- 画面描述：{{ $json['画面描述'] }}\\n- 镜头运动参考：{{ $json['camera_movement'] || 'static' }}\\n- 画面氛围：{{ $json['mood'] || 'neutral' }}\"\n        }\n      ]\n    }\n  ],\n  \"generationConfig\": {\n    \"temperature\": 0.4\n  }\n}",
+        "jsonBody": "={{ JSON.stringify({\"contents\": [{\"parts\": [{\"text\": \"你是一位专业的AI视频导演。根据以下分镜信息，为一张静态图片生成一段'图生视频'提示词（用于 PixVerse / 即梦等AI视频工具）。\\n\\n核心规则：\\n1. 绝对不要描述图片中已有的静态元素（AI视频模型会自动参考原图）\\n2. 只描述以下动态要素：\\n   - 镜头运动：如 slow zoom in, dolly out, pan left to right, tracking shot, crane up, handheld shake, static shot\\n   - 主体动作：具体的动作和运动轨迹，如 'slowly turns head to the left, ears perked up, then begins trotting forward'\\n   - 环境动态：如 gentle breeze rustling grass, dappled sunlight shifting, water rippling, dust particles floating\\n   - 运动节奏：如 slow motion, normal speed, gradually accelerating, smooth and steady\\n3. 长度：30-50个英文单词\\n4. 只输出纯英文提示词，不要编号、标签、解释\\n\\n参考信息：\\n- 画面描述：\" + String($json['画面描述']) + \"\\n- 镜头运动参考：\" + String($json['camera_movement'] || 'static') + \"\\n- 画面氛围：\" + String($json['mood'] || 'neutral') + \"\"}]}], \"generationConfig\": {\"temperature\": 0.4}}) }}",
         "options": {
           "response": {
             "response": {
@@ -136,7 +136,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// 提取视频提示词 + 保留原始数据\nconst response = $input.first().json;\nconst sceneData = $('遍历分镜').item.json;\n\nlet videoPrompt = '';\ntry {\n  videoPrompt = response.candidates?.[0]?.content?.parts?.[0]?.text || '';\n  videoPrompt = videoPrompt.trim();\n} catch (e) {\n  videoPrompt = '';\n}\n\nreturn [{\n  json: {\n    ...sceneData,\n    video_prompt: videoPrompt\n  }\n}];"
+        "jsCode": "const response = $input.first().json;\nconst sceneData = $('遍历分镜').item.json;\nconst text = response.candidates?.[0]?.content?.parts?.[0]?.text;\nif (typeof text !== 'string' || !text.trim()) throw new Error('未生成视频提示词');\nreturn [{ json: { ...sceneData, video_prompt: text.trim() } }];"
       },
       "id": "extract-prompt-009",
       "name": "提取视频提示词",
@@ -190,7 +190,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// [FIX Bug4] 创建工作目录 + 生成图生视频任务清单 HTML\n// 合并到同一 Code 节点，避免 mkdir 节点游离于主流程外\nconst items = $input.all();\n\nconst mkdirCommand = 'mkdir -p /tmp/video_workspace';\ntry { require('fs').mkdirSync('/tmp/video_workspace', { recursive: true }); } catch(e) {}\n\nlet html = `<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\">\n<title>图生视频任务清单</title>\n<style>\n  body { font-family: -apple-system, sans-serif; max-width: 1200px; margin: 0 auto; padding: 20px; background: #fafafa; }\n  h1 { color: #333; border-bottom: 2px solid #4CAF50; padding-bottom: 10px; }\n  .task { display: flex; gap: 20px; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px; margin: 16px 0; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1); align-items: flex-start; }\n  .task img { width: 400px; border-radius: 8px; object-fit: cover; }\n  .info { flex: 1; }\n  h3 { margin: 0 0 8px 0; color: #333; }\n  .prompt { background: #f5f5f5; padding: 12px; border-radius: 6px; font-family: monospace; font-size: 13px; line-height: 1.5; margin: 8px 0; white-space: pre-wrap; cursor: pointer; border: 1px solid #e0e0e0; }\n  .prompt:hover { background: #e8f5e9; border-color: #4CAF50; }\n  .copy-btn { background: #4CAF50; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 14px; }\n  .copy-btn:hover { background: #45a049; }\n  .scene-num { display: inline-block; background: #4CAF50; color: white; padding: 2px 10px; border-radius: 12px; font-size: 12px; margin-bottom: 8px; }\n  .meta { color: #888; font-size: 12px; margin: 4px 0; }\n</style></head><body>\n<h1>图生视频任务清单</h1>\n<p style=\"color:#888\">点击提示词可复制 | 在 PixVerse/即梦网页端上传图片 + 粘贴提示词 | 生成后将视频URL填回 Google Sheets</p>\n<hr>`;\n\nfor (const item of items) {\n  const d = item.json;\n  const imgUrl = d['图片URL'] || d.image_url || '';\n  const sceneNum = d['分镜序号'] || d.scene_number || '?';\n  const desc = d['画面描述'] || d.description_cn || '';\n  const prompt = d.video_prompt || '';\n  const escapedPrompt = prompt.replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"\\\\'\").replace(/\\n/g, ' ');\n\n  html += `\n<div class=\"task\">\n  <img src=\"${imgUrl}\" alt=\"分镜${sceneNum}\" onerror=\"this.style.display='none'\">\n  <div class=\"info\">\n    <span class=\"scene-num\">分镜 ${sceneNum}</span>\n    <h3>${desc}</h3>\n    <div class=\"meta\">图片URL: ${imgUrl.substring(0, 80)}</div>\n    <div class=\"prompt\" onclick=\"navigator.clipboard.writeText(this.innerText)\" title=\"点击复制\">${prompt}</div>\n    <button class=\"copy-btn\" onclick=\"navigator.clipboard.writeText('${escapedPrompt}'); this.textContent='已复制!'; setTimeout(()=>this.textContent='复制提示词',1500)\">复制提示词</button>\n  </div>\n</div>`;\n}\n\nhtml += `<hr><p style=\"color:#888;text-align:center\">共 ${items.length} 个分镜 | 生成完毕后将视频URL填回 Google Sheets「视频URL」列</p></body></html>`;\n\n// [FIX Bug3] 将 html 字符串转为 Buffer 的 base64，供 readWriteFile 节点使用\nconst htmlBuffer = Buffer.from(html, 'utf8');\n\nreturn [{ json: { data: htmlBuffer.toString('base64'), total_scenes: items.length, fileName: '/tmp/video_workspace/task_list.html' } }];"
+        "jsCode": "// [FIX Bug4] 创建工作目录 + 生成图生视频任务清单 HTML\n// 合并到同一 Code 节点，避免 mkdir 节点游离于主流程外\nconst items = $input.all();\n\nrequire('fs').mkdirSync('/tmp/video_workspace', { recursive: true });\nconst escapeHtml = value => String(value ?? '').replace(/[&<>\"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;' }[ch]));\nconst imageSource = value => {\n  try {\n    const url = new (require('url').URL)(String(value));\n    return ['https:', 'http:'].includes(url.protocol) && !url.username && !url.password ? escapeHtml(url.href) : '';\n  } catch { return ''; }\n};\n\nlet html = `<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\">\n<title>图生视频任务清单</title>\n<style>\n  body { font-family: -apple-system, sans-serif; max-width: 1200px; margin: 0 auto; padding: 20px; background: #fafafa; }\n  h1 { color: #333; border-bottom: 2px solid #4CAF50; padding-bottom: 10px; }\n  .task { display: flex; gap: 20px; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px; margin: 16px 0; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1); align-items: flex-start; }\n  .task img { width: 400px; border-radius: 8px; object-fit: cover; }\n  .info { flex: 1; }\n  h3 { margin: 0 0 8px 0; color: #333; }\n  .prompt { background: #f5f5f5; padding: 12px; border-radius: 6px; font-family: monospace; font-size: 13px; line-height: 1.5; margin: 8px 0; white-space: pre-wrap; cursor: pointer; border: 1px solid #e0e0e0; }\n  .prompt:hover { background: #e8f5e9; border-color: #4CAF50; }\n  .copy-btn { background: #4CAF50; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 14px; }\n  .copy-btn:hover { background: #45a049; }\n  .scene-num { display: inline-block; background: #4CAF50; color: white; padding: 2px 10px; border-radius: 12px; font-size: 12px; margin-bottom: 8px; }\n  .meta { color: #888; font-size: 12px; margin: 4px 0; }\n</style></head><body>\n<h1>图生视频任务清单</h1>\n<p style=\"color:#888\">点击提示词可复制 | 在 PixVerse/即梦网页端上传图片 + 粘贴提示词 | 生成后将视频URL填回 Google Sheets</p>\n<hr>`;\n\nfor (const item of items) {\n  const d = item.json;\n  const imgUrl = String(d['图片URL'] || d.image_url || '');\n  const sceneNum = d['分镜序号'] || d.scene_number || '?';\n  const desc = d['画面描述'] || d.description_cn || '';\n  const prompt = d.video_prompt || '';\n\n  html += `\n<div class=\"task\">\n  <img src=\"${imageSource(imgUrl)}\" alt=\"分镜${escapeHtml(sceneNum)}\" onerror=\"this.style.display='none'\">\n  <div class=\"info\">\n    <span class=\"scene-num\">分镜 ${escapeHtml(sceneNum)}</span>\n    <h3>${escapeHtml(desc)}</h3>\n    <div class=\"meta\">图片URL: ${escapeHtml(imgUrl.substring(0, 80))}</div>\n    <div class=\"prompt\" onclick=\"navigator.clipboard.writeText(this.innerText)\" title=\"点击复制\">${escapeHtml(prompt)}</div>\n    <button class=\"copy-btn\" onclick=\"navigator.clipboard.writeText(this.previousElementSibling.innerText); this.textContent='已复制!'; setTimeout(()=>this.textContent='复制提示词',1500)\">复制提示词</button>\n  </div>\n</div>`;\n}\n\nhtml += `<hr><p style=\"color:#888;text-align:center\">共 ${items.length} 个分镜 | 生成完毕后将视频URL填回 Google Sheets「视频URL」列</p></body></html>`;\n\n// Read/Write Files expects binary.data, not a base64 field in json.\nreturn [{\n  json: { total_scenes: items.length, fileName: '/tmp/video_workspace/task_list.html' },\n  binary: { data: { data: Buffer.from(html, 'utf8').toString('base64'), mimeType: 'text/html', fileName: 'task_list.html' } }\n}];"
       },
       "id": "gen-html-012",
       "name": "生成HTML任务清单",
@@ -202,9 +202,8 @@
       "parameters": {
         "operation": "write",
         "fileName": "=/tmp/video_workspace/task_list.html",
-        "options": {
-          "encoding": "base64"
-        }
+        "dataPropertyName": "data",
+        "options": {}
       },
       "id": "write-html-013",
       "name": "保存HTML文件",
@@ -272,7 +271,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// 按分镜序号排序\nconst items = $input.all();\nitems.sort((a, b) => {\n  const numA = parseInt(a.json['分镜序号'] || a.json.scene_number || 0);\n  const numB = parseInt(b.json['分镜序号'] || b.json.scene_number || 0);\n  return numA - numB;\n});\nreturn items;"
+        "jsCode": "const items = $input.all();\nconst seen = new Set();\nfor (const item of items) {\n  const raw = item.json['分镜序号'] ?? item.json.scene_number;\n  const num = Number(raw);\n  if (!/^\\d+$/.test(String(raw)) || !Number.isSafeInteger(num) || num < 1) throw new Error('分镜序号必须为正整数');\n  if (seen.has(num)) throw new Error('分镜序号重复');\n  seen.add(num);\n  item.json.scene_number = num;\n}\nitems.sort((a, b) => a.json.scene_number - b.json.scene_number);\nif (!items.length) throw new Error('没有视频片段');\nconst workspace = require('fs').mkdtempSync('/tmp/video_workspace-');\nreturn items.map(item => ({ ...item, json: { ...item.json, workspace } }));"
       },
       "id": "sort-scenes-019",
       "name": "按分镜序号排序",
@@ -293,7 +292,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// [FIX Bug2] 此节点仅在 output[0]（还有batch）时执行，下载当前分镜视频\nconst sceneNum = $json['分镜序号'] || $json.scene_number || 0;\nconst videoUrl = $json['视频URL'] || '';\n\nif (!videoUrl) {\n  return [{ json: { error: '视频URL为空', scene_number: sceneNum } }];\n}\n\nconst paddedNum = String(sceneNum).padStart(3, '0');\nconst outputPath = `/tmp/video_workspace/clip_${paddedNum}.mp4`;\n\nconst response = await fetch(videoUrl);\nif (!response.ok) {\n  return [{ json: { error: `下载失败: ${response.status}`, scene_number: sceneNum, output_path: '' } }];\n}\n\nconst arrayBuffer = await response.arrayBuffer();\nconst buffer = Buffer.from(arrayBuffer);\n\nconst fs = require('fs');\nfs.mkdirSync('/tmp/video_workspace', { recursive: true });\nfs.writeFileSync(outputPath, buffer);\n\nreturn [{\n  json: {\n    scene_number: sceneNum,\n    output_path: outputPath,\n    file_size: buffer.length,\n    downloaded: true\n  }\n}];"
+        "jsCode": "const raw = $json['分镜序号'] ?? $json.scene_number;\nconst sceneNum = Number(raw);\nif (!/^\\d+$/.test(String(raw)) || !Number.isSafeInteger(sceneNum) || sceneNum < 1) throw new Error('分镜序号必须为正整数');\n// Optional exact hostnames from the n8n env var VIDEO_CDN_HOSTS (comma-separated, no wildcards). When unset, any public HTTPS host is accepted; the checks below and the public-IP pinning still apply.\nconst allowedHosts = new Set(String($env.VIDEO_CDN_HOSTS || '').split(',').map(h => h.trim().toLowerCase()).filter(Boolean));\nlet url;\ntry { url = new (require('url').URL)($json['视频URL']); } catch { throw new Error('视频URL无效'); }\nif (require('net').isIP(url.hostname) || url.hostname.includes(':') || url.protocol !== 'https:' || url.username || url.password || (url.port && url.port !== '443') || (allowedHosts.size > 0 && !allowedHosts.has(url.hostname))) {\n  throw new Error('视频URL主机不在白名单或不是HTTPS');\n}\nconst workspace = $('按分镜序号排序').first().json.workspace;\nif (!/^\\/tmp\\/video_workspace-[A-Za-z0-9]+$/.test(workspace)) throw new Error('工作目录无效');\nlet timer;\nconst buffer = await new Promise((resolve, reject) => {\n  const https = require('https');\n  const blocked = new (require('net').BlockList)();\n  for (const [network, prefix] of [['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10],\n    ['127.0.0.0', 8], ['169.254.0.0', 16], ['172.16.0.0', 12], ['192.0.0.0', 24],\n    ['192.0.2.0', 24], ['192.168.0.0', 16], ['198.18.0.0', 15], ['198.51.100.0', 24],\n    ['203.0.113.0', 24], ['224.0.0.0', 4], ['240.0.0.0', 4]]) blocked.addSubnet(network, prefix);\n  // Pin the connection to a validated public IPv4 address; avoid DNS rebinding.\n  const lookup = (hostname, options, callback) => require('dns').lookup(hostname, { family: 4, all: true }, (error, addresses) => {\n    if (error) { callback(error); return; }\n    if (!addresses.length || addresses.some(entry => blocked.check(entry.address, 'ipv4'))) {\n      callback(new Error('视频URL主机解析到非公网地址')); return;\n    }\n    const address = addresses[0];\n    if (options.all) callback(null, [address]);\n    else callback(null, address.address, 4);\n  });\n  const request = https.get(url, { timeout: 30000, family: 4, autoSelectFamily: false, lookup }, response => {\n    response.on('error', reject);\n    response.on('aborted', () => reject(new Error('下载中断')));\n    if (response.statusCode !== 200) {\n      response.destroy();\n      reject(new Error(`下载失败: ${response.statusCode}`));\n      return;\n    }\n    const chunks = [];\n    let size = 0;\n    response.on('data', chunk => {\n      size += chunk.length;\n      if (size > 100 * 1024 * 1024) { response.destroy(new Error('视频过大')); return; }\n      chunks.push(chunk);\n    });\n    response.on('end', () => size ? resolve(Buffer.concat(chunks)) : reject(new Error('视频为空')));\n  });\n  timer = setTimeout(() => request.destroy(new Error('下载超时')), 60000);\n  request.on('timeout', () => request.destroy(new Error('下载超时')));\n  request.on('error', reject);\n  request.on('close', () => clearTimeout(timer));\n}).finally(() => clearTimeout(timer));\nconst outputPath = `${workspace}/clip_${String(sceneNum).padStart(16, '0')}.mp4`;\nrequire('fs').writeFileSync(outputPath, buffer, { flag: 'wx', mode: 0o600 });\nreturn [{ json: { scene_number: sceneNum, workspace, output_path: outputPath, file_size: buffer.length, downloaded: true } }];"
       },
       "id": "download-clip-023",
       "name": "下载视频片段",
@@ -314,7 +313,7 @@
     },
     {
       "parameters": {
-        "command": "ls /tmp/video_workspace/clip_*.mp4 2>/dev/null | sort | awk '{print \"file \\x27\" $0 \"\\x27\"}' > /tmp/video_workspace/filelist.txt && echo \"文件列表：\" && cat /tmp/video_workspace/filelist.txt"
+        "command": "={{ \"cd '\" + $('按分镜序号排序').first().json.workspace + \"' && set -- clip_*.mp4 && test -f \\\"$1\\\" && printf \\\"file '%s'\\\\n\\\" \\\"$@\\\" > filelist.txt\" }}"
       },
       "id": "gen-filelist-025",
       "name": "生成文件列表",
@@ -324,7 +323,7 @@
     },
     {
       "parameters": {
-        "command": "ffmpeg -y -f concat -safe 0 -i /tmp/video_workspace/filelist.txt -c:v libx264 -c:a aac -movflags +faststart /tmp/video_workspace/final_output.mp4 2>&1 | tail -5"
+        "command": "={{ \"cd '\" + $('按分镜序号排序').first().json.workspace + \"' && ffmpeg -y -f concat -safe 1 -i filelist.txt -c:v libx264 -c:a aac -movflags +faststart final_output.mp4\" }}"
       },
       "id": "ffmpeg-concat-026",
       "name": "FFmpeg拼接视频",
@@ -334,7 +333,7 @@
     },
     {
       "parameters": {
-        "command": "rm -f /tmp/video_workspace/clip_*.mp4 /tmp/video_workspace/filelist.txt && echo '临时文件已清理，粗剪视频：/tmp/video_workspace/final_output.mp4'"
+        "command": "={{ \"cd '\" + $('按分镜序号排序').first().json.workspace + \"' && rm -f -- clip_*.mp4 filelist.txt\" }}"
       },
       "id": "cleanup-temp-027",
       "name": "清理临时文件",
@@ -349,7 +348,7 @@
             {
               "id": "output_path",
               "name": "output_path",
-              "value": "/tmp/video_workspace/final_output.mp4",
+              "value": "={{ $('按分镜序号排序').first().json.workspace + '/final_output.mp4' }}",
               "type": "string"
             },
             {
@@ -407,14 +406,14 @@
       "main": [
         [
           {
-            "node": "Gemini生成视频提示词",
+            "node": "生成HTML任务清单",
             "type": "main",
             "index": 0
           }
         ],
         [
           {
-            "node": "生成HTML任务清单",
+            "node": "Gemini生成视频提示词",
             "type": "main",
             "index": 0
           }
@@ -535,14 +534,14 @@
       "main": [
         [
           {
-            "node": "下载视频片段",
+            "node": "生成文件列表",
             "type": "main",
             "index": 0
           }
         ],
         [
           {
-            "node": "生成文件列表",
+            "node": "下载视频片段",
             "type": "main",
             "index": 0
           }
