@@ -16,6 +16,7 @@ const node = (flow, name) => flow.nodes.find(n => n.name === name);
 const items = rows => rows.map(json => ({ json }));
 async function run(flow, name, rows = [], extra = {}) {
   const context = { Buffer, URL, require, setTimeout, clearTimeout, $json: rows[0],
+    $env: { VIDEO_CDN_HOSTS: ' Media.Example.com , ' },
     $input: { all: () => items(rows), first: () => items(rows)[0] }, ...extra };
   const result = await vm.runInNewContext(`(async () => {${node(flow, name).parameters.jsCode}\n})()`, context);
   return JSON.parse(JSON.stringify(result));
@@ -98,8 +99,7 @@ test('download rejects traversal and untrusted URLs before network or disk write
 
 test('downloads reject redirects, HTTP errors, oversized and interrupted bodies', async () => {
   const flow = JSON.parse(JSON.stringify(video));
-  node(flow, '下载视频片段').parameters.jsCode = node(flow, '下载视频片段').parameters.jsCode
-    .replace('YOUR_TRUSTED_VIDEO_CDN_HOST', 'media.example.com');
+  node(flow, '下载视频片段').parameters.jsCode = node(flow, '下载视频片段').parameters.jsCode;
   for (const [status, chunks, message] of [[302, [], /下载失败/], [500, [], /下载失败/],
     [200, [Buffer.alloc(100 * 1024 * 1024 + 1)], /过大/], [200, null, /中断/]]) {
     const https = { get(url, options, callback) {
@@ -139,8 +139,7 @@ test('each download run has an isolated directory and validates all scene number
 
 test('successful download writes only a validated, exclusive file in this run', async () => {
   const flow = JSON.parse(JSON.stringify(video));
-  node(flow, '下载视频片段').parameters.jsCode = node(flow, '下载视频片段').parameters.jsCode
-    .replace('YOUR_TRUSTED_VIDEO_CDN_HOST', 'media.example.com');
+  node(flow, '下载视频片段').parameters.jsCode = node(flow, '下载视频片段').parameters.jsCode;
   let written;
   const https = { get(url, options, callback) {
     assert.equal(url.href, 'https://media.example.com/a');
@@ -165,8 +164,7 @@ test('successful download writes only a validated, exclusive file in this run', 
 
 test('download DNS lookup rejects private answers and pins public addresses', async () => {
   const flow = JSON.parse(JSON.stringify(video));
-  node(flow, '下载视频片段').parameters.jsCode = node(flow, '下载视频片段').parameters.jsCode
-    .replace('YOUR_TRUSTED_VIDEO_CDN_HOST', 'media.example.com');
+  node(flow, '下载视频片段').parameters.jsCode = node(flow, '下载视频片段').parameters.jsCode;
   for (const address of ['127.0.0.1', '10.0.0.1', '169.254.169.254', '100.64.0.1', '192.168.0.1', '8.8.8.8']) {
     let checked = false;
     const https = { get(url, options) {
@@ -194,9 +192,8 @@ test('download DNS lookup rejects private answers and pins public addresses', as
 test('configured IP literals cannot bypass DNS validation', async () => {
   for (const host of ['127.0.0.1', '[::1]', '169.254.169.254']) {
     const flow = JSON.parse(JSON.stringify(video));
-    node(flow, '下载视频片段').parameters.jsCode = node(flow, '下载视频片段').parameters.jsCode
-      .replace('YOUR_TRUSTED_VIDEO_CDN_HOST', host);
-    await assert.rejects(run(flow, '下载视频片段', [{ 分镜序号: 1, 视频URL: `https://${host}/a` }]), /URL/);
+    node(flow, '下载视频片段').parameters.jsCode = node(flow, '下载视频片段').parameters.jsCode;
+    await assert.rejects(run(flow, '下载视频片段', [{ 分镜序号: 1, 视频URL: `https://${host}/a` }], { $env: { VIDEO_CDN_HOSTS: host } }), /URL/);
   }
 });
 
@@ -235,4 +232,27 @@ test('FFmpeg failure propagates and cannot run cleanup', () => {
     : command;
   const result = spawnSync('/bin/sh', ['-c', shell], { env: { PATH: '/nonexistent' } });
   assert.notEqual(result.status, 0);
+});
+
+test('allowlist placeholder is gone and comes from VIDEO_CDN_HOSTS', async () => {
+  const code = node(video, '下载视频片段').parameters.jsCode;
+  assert.ok(!code.includes('YOUR_TRUSTED_VIDEO_CDN_HOST'));
+  assert.ok(code.includes('$env.VIDEO_CDN_HOSTS'));
+  const noNetwork = { require: name => name === 'https' || name === 'dns' ? new Proxy({}, {
+    get() { throw new Error('unexpected network access'); },
+  }) : require(name) };
+  // Unset allowlist: a public HTTPS host passes the host gate and reaches the next step
+  // (workspace lookup or the stubbed network layer), instead of failing the host check.
+  await assert.rejects(run(video, '下载视频片段', [{ 分镜序号: 1, 视频URL: 'https://media.example.com/a' }],
+    { ...noNetwork, $env: {} }), err => !/URL|主机/.test(String(err)) && /is not defined|unexpected network access/.test(String(err)));
+  // Unset allowlist still refuses non-HTTPS, IP literals, credentials and other ports before any network access.
+  for (const url of ['http://media.example.com/a', 'https://127.0.0.1/a', 'https://user:pw@media.example.com/a',
+    'https://media.example.com:8443/a']) {
+    await assert.rejects(run(video, '下载视频片段', [{ 分镜序号: 1, 视频URL: url }], { ...noNetwork, $env: {} }), /URL|主机/);
+  }
+  for (const url of ['http://media.example.com/a', 'https://other.example.com/a',
+    'https://media.example.com.evil.test/a', 'https://user:pw@media.example.com/a',
+    'https://media.example.com:8443/a']) {
+    await assert.rejects(run(video, '下载视频片段', [{ 分镜序号: 1, 视频URL: url }], noNetwork), /URL|主机/);
+  }
 });
